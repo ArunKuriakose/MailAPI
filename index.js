@@ -11,7 +11,7 @@ fs.readFile('credentials.json', (err, content) => {
     if (err) 
       return console.log('Error loading client secret file:', err);
     // Authorize a client with credentials, then call the Gmail API.
-    authorize(JSON.parse(content), getMessages);
+    authorize(JSON.parse(content), addMessageData);
 });
 
 /**
@@ -68,19 +68,20 @@ function getNewToken(oAuth2Client, callback) {
 }
 
 /**
- * Retrieve all messages for last day from Gmail API, get metadata and return email counts
+ * Retrieve all messages for last day from Gmail API, get metadata and return email counts (Recieved, )
  *
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
 async function getMessages(auth) {
+  console.log("Getting messages");
   const gmail = google.gmail({version: 'v1', auth});
   var dailyMessageIds = [];
   var nextPageToken = '';
   do {
     nextPageToken = await getNextPageOfMessages(gmail, nextPageToken, dailyMessageIds);
+    console.log(nextPageToken);
   } while (nextPageToken);
-  var mailInfo = await getAllMessageInfo(gmail, dailyMessageIds);
-  console.log(mailInfo);
+  return await getAllMessageInfo(gmail, dailyMessageIds);
 }
 
 // Use next page token to get next set of message ids
@@ -108,6 +109,7 @@ function getNextPageOfMessages(gmail, token, dailyMessageIds) {
   });
 }
 
+// Use message ids retrieved from API to get actual metadata for each message and obtain gmail vs non-gmail sents/recieved stats
 async function getAllMessageInfo(gmail, dailyMessageIds) {
   return new Promise(function(resolve, reject) {
     var fromGmail = 0;
@@ -122,6 +124,7 @@ async function getAllMessageInfo(gmail, dailyMessageIds) {
     Promise.all(allPromises).then((result) => {
       for (let i = 0; i < result.length; i++) {
         if (result[i]) {
+          console.log(result[i]);
           if (result[i].startsWith("FROM")) {
             if (result[i].includes("@gmail.com"))
               fromGmail++;
@@ -146,6 +149,7 @@ async function getAllMessageInfo(gmail, dailyMessageIds) {
   });
 }
 
+// Metadata headers show to and from for email
 function getMessageHeaderInfo(gmail, messageId) {
   return new Promise(function(resolve, reject) {
     gmail.users.messages.get({
@@ -167,5 +171,27 @@ function getMessageHeaderInfo(gmail, messageId) {
       }
       resolve();
     });
+  });
+}
+
+async function addMessageData() {
+  var msgData = await getMessages();
+  console.log("HERE");
+  var AWS = require('aws-sdk');
+  AWS.config.credentials = new AWS.SharedIniFileCredentials({profile: 'default'});
+  AWS.config.update({region:'us-east-1'});
+  ddb = new AWS.DynamoDB();
+  var params = {
+    TableName: 'EmailCounts',
+    Item: {
+      'Date' : new Date(),
+      'MsgCounts' : msgData
+    }
+  };
+  ddb.putItem(params, function(err, data) {
+    if (err)
+      console.log("Error occurred updating message counts", err);
+    else
+      console.log("Updated table ", data);
   });
 }
