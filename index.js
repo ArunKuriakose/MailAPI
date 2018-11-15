@@ -68,7 +68,7 @@ function getNewToken(oAuth2Client, callback) {
 }
 
 /**
- * Get's messages for this users account
+ * Retrieve all messages for last day from Gmail API, get metadata and return email counts
  *
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
@@ -83,6 +83,7 @@ async function getMessages(auth) {
   console.log(mailInfo);
 }
 
+// Use next page token to get next set of message ids
 function getNextPageOfMessages(gmail, token, dailyMessageIds) {
   return new Promise(function(resolve, reject) {
     gmail.users.messages.list({
@@ -117,7 +118,31 @@ async function getAllMessageInfo(gmail, dailyMessageIds) {
     for (let i = 0; i < dailyMessageIds.length; i++) {
       allPromises.push(getMessageHeaderInfo(gmail, dailyMessageIds[i]));
     }
-    resolve(Promise.all(allPromises));
+    
+    Promise.all(allPromises).then((result) => {
+      for (let i = 0; i < result.length; i++) {
+        if (result[i]) {
+          if (result[i].startsWith("FROM")) {
+            if (result[i].includes("@gmail.com"))
+              fromGmail++;
+            else
+              fromOther++;
+          }
+          else {
+            if (result[i].includes("@gmail.com"))
+              toGmail++;
+            else
+              toOther++;
+          }
+        }
+      }
+      resolve({
+        gmailRecv: fromGmail,
+        otherRecv: fromOther,
+        gmailSent: toGmail,
+        otherSent: toOther
+      });
+    });
   });
 }
 
@@ -128,7 +153,7 @@ function getMessageHeaderInfo(gmail, messageId) {
       id: messageId,
     }, (err, res) => {
       if (err) 
-        return console.log('The API returned an error: ' + err);
+        throw err;
       const headers = res.data.payload.headers;
       if (headers.length) {
         headers.forEach((header) => {
@@ -140,6 +165,7 @@ function getMessageHeaderInfo(gmail, messageId) {
           }
         });
       }
+      resolve();
     });
   });
 }
