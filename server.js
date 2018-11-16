@@ -87,7 +87,7 @@ function getNextPageOfMessages(gmail, token, dailyMessageIds) {
         return console.log('The API returned an error: ' + err);
       const messages = res.data.messages;
       token = res.data.nextPageToken;
-      if (messages.length) {
+      if (messages && messages.length) {
         messages.forEach((message) => {
           dailyMessageIds.push(`${message.id}`);
         });
@@ -108,34 +108,44 @@ async function getAllMessageInfo(gmail, dailyMessageIds) {
     var fromOther = 0;
     var toOther = 0;
     var allPromises = [];
-    for (let i = 0; i < dailyMessageIds.length; i++) {
-      allPromises.push(getMessageHeaderInfo(gmail, dailyMessageIds[i]));
-    }
-    
-    Promise.all(allPromises).then((result) => {
-      for (let i = 0; i < result.length; i++) {
-        if (result[i]) {
-          if (result[i].startsWith("FROM")) {
-            if (result[i].includes("@gmail.com"))
-              fromGmail++;
-            else
-              fromOther++;
-          }
-          else {
-            if (result[i].includes("@gmail.com"))
-              toGmail++;
-            else
-              toOther++;
+    if (dailyMessageIds) {
+      for (let i = 0; i < dailyMessageIds.length; i++) {
+        allPromises.push(getMessageHeaderInfo(gmail, dailyMessageIds[i]));
+      }
+      
+      Promise.all(allPromises).then((result) => {
+        for (let i = 0; i < result.length; i++) {
+          if (result[i]) {
+            if (result[i].startsWith("FROM")) {
+              if (result[i].includes("@gmail.com"))
+                fromGmail++;
+              else
+                fromOther++;
+            }
+            else {
+              if (result[i].includes("@gmail.com"))
+                toGmail++;
+              else
+                toOther++;
+            }
           }
         }
-      }
+        resolve({
+          gmailRecv: fromGmail,
+          otherRecv: fromOther,
+          gmailSent: toGmail,
+          otherSent: toOther
+        });
+      });
+    }
+    else {
       resolve({
         gmailRecv: fromGmail,
         otherRecv: fromOther,
         gmailSent: toGmail,
         otherSent: toOther
       });
-    });
+    }
   });
 }
 
