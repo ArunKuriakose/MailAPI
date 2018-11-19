@@ -2,6 +2,10 @@ const fs = require('fs');
 const readline = require('readline');
 const {google} = require('googleapis');
 
+var AWS = require('aws-sdk');
+AWS.config.credentials = new AWS.SharedIniFileCredentials({profile: 'default'});
+AWS.config.update({region:'us-east-2'});
+
 // If modifying these scopes, delete token.json.
 const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
 const TOKEN_PATH = 'token.json';
@@ -182,13 +186,11 @@ function getMessageHeaderInfo(gmail, messageId) {
 
 async function addMessageData(auth) {
   var msgData = await getMessages(auth);
-  var AWS = require('aws-sdk');
-  AWS.config.credentials = new AWS.SharedIniFileCredentials({profile: 'default'});
-  AWS.config.update({region:'us-east-2'});
   var params = {
-    TableName: 'EmailCounts',
+    TableName: 'EmailStats',
     Item: {
-      'Date' : new Date().toISOString(),
+      'StatsDay' : formatDate(null),
+      'StatsHour' : new Date().toISOString(),
       'fromGmail' : msgData.gmailRecv,
       'fromOther' : msgData.otherRecv,
       'toGmail' : msgData.gmailSent,
@@ -214,12 +216,92 @@ function startCollecting() {
   });
 }
 
+function formatDate(date) {
+  var d = date ? new Date(date) : new Date(),
+      month = '' + (d.getMonth() + 1),
+      day = '' + d.getDate(),
+      year = d.getFullYear();
+
+  if (month.length < 2) month = '0' + month;
+  if (day.length < 2) day = '0' + day;
+
+  return [year, month, day].join('-');
+}
+
+function getUTCDate(date) {
+  var d = new Date(date); 
+  var now_utc =  Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 
+    d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds());
+  return new Date(now_utc);
+}
+
 var schedule = require('node-schedule');
 var j = schedule.scheduleJob('0 0 * * * *', startCollecting);
 
 var express = require('express'), 
     app = express(),
     port = process.env.PORT || 3000;
+
+app.get('/api/email/stats', (req, res) => {
+  if (!req.query.day) {
+    console.log("No day specified in request, nothing to get");
+    res.status(400).send({error: "No day specified in request, nothing to get"});
+    return;
+  }
+  if (req.query.hour) {
+    if (req.query.hour < 0 || req.query.hour > 23) {
+      console.log("Requested hour must be within 0 and 23, query hour = " + req.query.hour);
+      res.status(400).send({error: "Requested hour must be within 0 and 23, query hour = " + req.query.hour});
+      return;
+    }
+  }
+  var queryDate = getUTCDate(req.query.day);
+  console.log(req.query.day);
+  if (req.query.hour) {
+    queryDate.setUTCHours(req.query.hour);
+    queryDate.setUTCMinutes(1);
+    queryDate.setUTCSeconds(0);
+    var endTime = queryDate.toISOString();
+    queryDate.setMinutes(queryDate.getMinutes()-2);
+    var startTime = queryDate.toISOString();
+    console.log(startTime);
+  }
+  else {
+    queryDate.setUTCHours(0);
+    queryDate.setUTCMinutes(0);
+    queryDate.setUTCSeconds(0);
+    queryDate.setUTCMilliseconds(0);
+    var startTime = queryDate.toISOString();
+    queryDate.setUTCHours(23);
+    queryDate.setUTCMinutes(59);
+    queryDate.setUTCSeconds(59);
+    queryDate.setUTCMilliseconds(999);
+    var endTime = queryDate.toISOString();
+  }
+  var params = {
+    TableName: 'EmailStats',
+    KeyConditionExpression: '#StatsDay = :day and #StatsHour BETWEEN :start and :end',
+    ExpressionAttributeNames: {
+      '#StatsDay': 'StatsDay',
+      '#StatsHour': 'StatsHour',
+    },
+    ExpressionAttributeValues: {
+      ':day' : req.query.day,
+      ':start' : startTime,
+      ':end' : endTime,
+    }
+  };
+
+  var documentClient = new AWS.DynamoDB.DocumentClient();
+  documentClient.query(params, function(err, data) {
+    if (err) {
+      console.log("Error occurred getting message counts", err);
+      res.status(500).send({error: err});
+    }
+    else
+      res.send(JSON.stringify(data, null, 2));
+  });
+});
 
 app.listen(port);
 
